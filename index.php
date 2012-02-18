@@ -104,9 +104,7 @@ if ($diff_request_response->getStatusCode() != 200) {
 
 $diff_content = $diff_request_response->getBody();
 
-// Clone the git repo!
-
-$filenames_and_ranges = array();
+$filenames_and_positions = array();
 
 $diff_file_chunks = preg_split("/diff --git /", $diff_content);
 foreach ($diff_file_chunks as $file_diff) {
@@ -126,7 +124,6 @@ foreach ($diff_file_chunks as $file_diff) {
   }
 
   // Parse the rest for diff ranges.
-  $diff_ranges = array();
   $diff_position_map = array();
 
   $diff_position = -1;
@@ -138,8 +135,6 @@ foreach ($diff_file_chunks as $file_diff) {
     $matches = array();
     preg_match("/(\d+),(\d+) @@/", $chunk, $matches);
     $range_start = $matches[1];
-    $range_end = $matches[1] + $matches[2] - 1;
-    $diff_ranges[] = array($range_start, $range_end);
 
     $diff_line = $range_start - 1;
     // Create a map of line in file -> position in diff.
@@ -161,15 +156,12 @@ foreach ($diff_file_chunks as $file_diff) {
     }
   }
 
-  $filenames_and_ranges[$filename] = array(
-    'ranges' => $diff_ranges,
-    'positions' => $diff_position_map,
-  );
+  $filenames_and_positions[$filename] = $diff_position_map;
 }
 
 $github_comments = array();
 
-foreach ($filenames_and_ranges as $filename => $data) {
+foreach ($filenames_and_positions as $filename => $data) {
   $github_comments[$filename] = array();
 
   $xml_output = run_php_codesniffer("${repo_path}/${filename}");
@@ -181,25 +173,17 @@ foreach ($filenames_and_ranges as $filename => $data) {
     if (error_in_range($error_line, $data)) {
       // Convert the line to a diff position and add to the filename array.
       $github_comments[$filename][] = array(
-        $data['positions'][$error_line] => (string) $error,
+        $data[$error_line] => (string) $error,
       );
     }
   }
 }
 
-die(print_r($github_comments, TRUE));
-
 function error_in_range($line, $data) {
-  return in_array($line, array_keys($data['positions']));
+  return in_array($line, array_keys($data));
 }
 
+
 // Pseudo-code follows.
-
-// Get the SHA of the head commit of the pull request and update a local git repo.
-//   (As a possible fallback, pull a bunch of files from raw.github.com? Would that work for private repos?)
-
-// Iterate over the list of files. For each file:
-//   2. Download the files and run them through run_php_codesniffer().
-//   3. Use SimpleXML to iterate over the CodeSniffer XML and grab all errors that are within the visible diff positions.
 //   4. Post those as comments through the GitHub Pull Request Comments API.
 
