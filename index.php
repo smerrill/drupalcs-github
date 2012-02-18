@@ -67,7 +67,13 @@ $repo_name = $pull_request_info->head->repo->name;
 $repo_remote = $pull_request_info->head->repo->ssh_url;
 
 // Get git ready.
-mkdir(dirname(__FILE__) . "/repos/${repo_name}");
+if (!is_dir(dirname(__FILE__) . "/repos/${repo_name}")) {
+  mkdir(dirname(__FILE__) . "/repos/${repo_name}");
+}
+
+if (!is_dir(dirname(__FILE__) . "/repos/${repo_name}/.git")) {
+  shell_exec("git init " . dirname(__FILE__) . "/repos/${repo_name}");
+}
 
 // Retrieve and parse the diff to get a list of files to be checked.
 $diff_request_response = $github->get($pull_request_info->diff_url)->send();
