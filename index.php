@@ -63,8 +63,6 @@ $pull_request_info = json_decode($pull_request_response->getBody());
 
 $pull_request_info = json_decode(file_get_contents("test.json"));
 
-// Pseudo-code follows.
-
 // Retrieve and parse the diff to get a list of files to be checked.
 $diff_request_response = $github->get($pull_request_info->diff_url)->send();
 
@@ -73,6 +71,8 @@ if ($diff_request_response->getStatusCode() != 200) {
 }
 
 $diff_content = $diff_request_response->getBody();
+
+$filenames_and_ranges = array();
 
 $diff_file_chunks = preg_split("/diff --git /", $diff_content);
 foreach ($diff_file_chunks as $file_diff) {
@@ -83,18 +83,38 @@ foreach ($diff_file_chunks as $file_diff) {
 
   // Split up diffs and get ready to calculate its ranges.
   $file_diff_chunks = preg_split("/\n@@ [-0-9,]+ \+/", $file_diff);
-  foreach ($file_diff_chunks as $file_diff_chunk) {
-    // Parse #1 for filename.
-    // Parse the rest for diff ranges.
+
+  // Parse #1 for filename.
+  $matches = array();
+  preg_match("/a\/([^\s]+)/", $file_diff_chunks[0], $matches);
+  if (!$filename = $matches[1]) {
+    die("Error finding a filename for a diff segment.");
   }
-  print_r($file_diff_chunks);
+
+  // Parse the rest for diff ranges.
+  $diff_ranges = array();
+  foreach ($file_diff_chunks as $index => $chunk) {
+    if ($index == 0) {
+      continue;
+    }
+
+    //$diff_ranges[] = 
+    $matches = array();
+    preg_match("/(\d+),(\d+) @@/", $chunk, $matches);
+    $range_start = $matches[1];
+    $range_end = $matches[1] + $matches[2] - 1;
+    $diff_ranges[] = array($range_start, $range_end);
+  }
+
+  $filenames_and_ranges[$filename] = $diff_ranges;
 }
+
+// Pseudo-code follows.
 
 // Get the SHA of the head commit of the pull request and update a local git repo.
 //   (As a possible fallback, pull a bunch of files from raw.github.com? Would that work for private repos?)
 
 // Iterate over the list of files. For each file:
-//   1. Parse the diff markers to know which diff positions are visible and can have comments posted to them.
 //   2. Download the files and run them through run_php_codesniffer().
 //   3. Use SimpleXML to iterate over the CodeSniffer XML and grab all errors that are within the visible diff positions.
 //   4. Post those as comments through the GitHub Pull Request Comments API.
