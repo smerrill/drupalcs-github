@@ -63,6 +63,12 @@ $pull_request_info = json_decode($pull_request_response->getBody());
 
 $pull_request_info = json_decode(file_get_contents("test.json"));
 
+$repo_name = $pull_request_info->head->repo->name;
+$repo_remote = $pull_request_info->head->repo->ssh_url;
+
+// Get git ready.
+mkdir(dirname(__FILE__) . "/repos/${repo_name}");
+
 // Retrieve and parse the diff to get a list of files to be checked.
 $diff_request_response = $github->get($pull_request_info->diff_url)->send();
 
@@ -71,6 +77,8 @@ if ($diff_request_response->getStatusCode() != 200) {
 }
 
 $diff_content = $diff_request_response->getBody();
+
+// Clone the git repo!
 
 $filenames_and_ranges = array();
 
@@ -98,7 +106,6 @@ foreach ($diff_file_chunks as $file_diff) {
       continue;
     }
 
-    //$diff_ranges[] = 
     $matches = array();
     preg_match("/(\d+),(\d+) @@/", $chunk, $matches);
     $range_start = $matches[1];
@@ -107,6 +114,12 @@ foreach ($diff_file_chunks as $file_diff) {
   }
 
   $filenames_and_ranges[$filename] = $diff_ranges;
+}
+
+die(print_r($filenames_and_ranges, TRUE));
+
+foreach ($filenames_and_ranges as $filename => $range) {
+  
 }
 
 // Pseudo-code follows.
