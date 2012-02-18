@@ -30,7 +30,7 @@ function run_php_codesniffer($file_path) {
   $config_values = $phpcs->getDefaults();
   $config_values['extensions'] = array('php', 'module', 'inc', 'install', 'test', 'profile', 'theme');
   $config_values['files'] = array($file_path);
-  $config_values['standard'] = 'DrupalCodingStandard';
+  $config_values['standard'] = 'Drupal';
   $config_values['reports'] = array('xml' => null);
 
   // Use output buffering to grab the XML output.
@@ -63,16 +63,36 @@ $pull_request_info = json_decode($pull_request_response->getBody());
 
 $pull_request_info = json_decode(file_get_contents("test.json"));
 
+$repo_ref = $pull_request_info->head->ref;
 $repo_name = $pull_request_info->head->repo->name;
 $repo_remote = $pull_request_info->head->repo->ssh_url;
-
-// Get git ready.
-if (!is_dir(dirname(__FILE__) . "/repos/${repo_name}")) {
-  mkdir(dirname(__FILE__) . "/repos/${repo_name}");
+$matches = array();
+if (preg_match('/:(\w+)\/(\w+)\.git/', $repo_remote, $matches)) {
+  $repo_remote_name = "${matches[1]}-${matches[2]}";
+}
+else {
+  die("Could not parse a name for the remote repo.");
 }
 
-if (!is_dir(dirname(__FILE__) . "/repos/${repo_name}/.git")) {
-  shell_exec("git init " . dirname(__FILE__) . "/repos/${repo_name}");
+// Create the git repo if it has not been created yet.
+$repo_path = dirname(__FILE__) . "/repos/${repo_name}";
+if (!is_dir($repo_path)) {
+  mkdir($repo_path);
+}
+if (!is_dir("${repo_path}/.git")) {
+  shell_exec("git init ${repo_path}");
+}
+
+// Add the remote if it has not been created yet.
+if (!preg_match("/${repo_remote_name}/", shell_exec("cd ${repo_path}; git remote show"))) {
+  shell_exec("cd ${repo_path}; git remote add ${repo_remote_name} ${repo_remote}");
+}
+
+// @TODO: Add error checking!
+$output = shell_exec("cd ${repo_path}; git fetch ${repo_remote_name}; git checkout ${repo_ref}");
+if ($output == NULL) {
+  // @TODO: Remove this hack.
+  // die("Could not check out the ${repo_remote_name}/${repo_ref} branch.");
 }
 
 // Retrieve and parse the diff to get a list of files to be checked.
@@ -107,6 +127,9 @@ foreach ($diff_file_chunks as $file_diff) {
 
   // Parse the rest for diff ranges.
   $diff_ranges = array();
+  $diff_position_map = array();
+
+  $diff_position = -1;
   foreach ($file_diff_chunks as $index => $chunk) {
     if ($index == 0) {
       continue;
@@ -117,15 +140,57 @@ foreach ($diff_file_chunks as $file_diff) {
     $range_start = $matches[1];
     $range_end = $matches[1] + $matches[2] - 1;
     $diff_ranges[] = array($range_start, $range_end);
+
+    $diff_line = $range_start - 1;
+    // Create a map of line in file -> position in diff.
+    foreach (preg_split("/\n/", $chunk) as $index => $line) {
+      if ($line == "") {
+        continue;
+      }
+
+      $diff_position++;
+      if ($index == 0) {
+        continue;
+      }
+      if (preg_match("/^-/", $line)) {
+        continue;
+      }
+      $diff_line++;
+
+      $diff_position_map[$diff_line] = $diff_position;
+    }
   }
 
-  $filenames_and_ranges[$filename] = $diff_ranges;
+  $filenames_and_ranges[$filename] = array(
+    'ranges' => $diff_ranges,
+    'positions' => $diff_position_map,
+  );
 }
 
-die(print_r($filenames_and_ranges, TRUE));
+$github_comments = array();
 
-foreach ($filenames_and_ranges as $filename => $range) {
-  
+foreach ($filenames_and_ranges as $filename => $data) {
+  $github_comments[$filename] = array();
+
+  $xml_output = run_php_codesniffer("${repo_path}/${filename}");
+  $xml_document = simplexml_load_string($xml_output);
+
+  foreach ($xml_document->file->error as $error) {
+    $error_line = (int) $error['line'];
+
+    if (error_in_range($error_line, $data)) {
+      // Convert the line to a diff position and add to the filename array.
+      $github_comments[$filename][] = array(
+        $data['positions'][$error_line] => (string) $error,
+      );
+    }
+  }
+}
+
+die(print_r($github_comments, TRUE));
+
+function error_in_range($line, $data) {
+  return in_array($line, array_keys($data['positions']));
 }
 
 // Pseudo-code follows.
